@@ -1,9 +1,10 @@
+# .github/workflows/update_prices.yml
 name: Update Stock Prices
 
 on:
   schedule:
-    - cron: '30 7 * * 1-5'
-  workflow_dispatch:
+    - cron: '30 7 * * 1-5'   # UTC 07:30 = 北京时间 15:30，仅工作日
+  workflow_dispatch:           # 允许手动触发
 
 jobs:
   update:
@@ -13,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests
+      - run: pip install requests akshare
       - run: python update_prices.py
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
