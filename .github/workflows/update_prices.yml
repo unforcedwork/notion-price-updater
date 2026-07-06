@@ -17,5 +17,7 @@ jobs:
       - run: pip install requests akshare
       - run: python update_prices.py
         env:
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          databaseID: ${{ secrets.databaseID }}
+          NOTION_TOKEN: $ secrets.NOTION_TOKEN 
+          databaseID: $ secrets.databaseID 
+          SNAPSHOT_DATABASE_ID: $ secrets.SNAPSHOT_DATABASE_ID 
+          SELL_DATABASE_ID: $ secrets.SELL_DATABASE_ID 
