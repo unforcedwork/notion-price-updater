@@ -7,8 +7,10 @@ from datetime import date
 
 
 # ─── 配置 ───────────────────────────────────────────────
-NOTION_TOKEN = os.environ["NOTION_TOKEN"].strip('"“”‘’ ')
-DATABASE_ID  = os.environ["databaseID"].strip('"“”‘’ ')
+NOTION_TOKEN         = os.environ["NOTION_TOKEN"].strip('"“”‘’ ')
+DATABASE_ID          = os.environ["databaseID"].strip('"“”‘’ ')
+SNAPSHOT_DATABASE_ID = os.environ["SNAPSHOT_DATABASE_ID"].strip('"“”‘’ ')
+SELL_DATABASE_ID     = os.environ["SELL_DATABASE_ID"].strip('"“”‘’ ')
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -65,6 +67,14 @@ def get_all_holdings() -> list[dict]:
     return resp.json().get("results", [])
 
 
+def get_all_holdings_full() -> list[dict]:
+    """查询持有总览中的全部资产页面（含已清仓），用于汇总总市值/总投入。"""
+    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
+    resp = requests.post(url, headers=HEADERS, json={}, timeout=15)
+    resp.raise_for_status()
+    return resp.json().get("results", [])
+
+
 def update_price(page_id: str, price: float) -> None:
     """将价格写入 Notion 页面的「当前价格」字段。"""
     url = f"https://api.notion.com/v1/pages/{page_id}"
@@ -75,48 +85,6 @@ def update_price(page_id: str, price: float) -> None:
     }
     resp = requests.patch(url, headers=HEADERS, json=payload, timeout=15)
     resp.raise_for_status()
-
-
-def main():
-    print(f"[{date.today()}] 开始更新股价...")
-    pages = get_all_holdings()
-
-    # 只处理在 ASSET_MAP 中的资产
-    targets = {}
-    page_map = {}
-    for page in pages:
-        asset_name = page["properties"]["资产"]["title"][0]["plain_text"]
-        if asset_name not in ASSET_MAP:
-            print(f"[SKIP] {asset_name}")
-            continue
-        targets[asset_name] = ASSET_MAP[asset_name]
-        page_map[asset_name] = page["id"]
-
-    if not targets:
-        print("无需更新。")
-        return
-
-    prices = get_prices_sina(targets)  # 一次请求拿所有价格
-
-    for name, price in prices.items():
-        update_price(page_map[name], price)
-        print(f"[OK]   {name} → {price}")
-        time.sleep(0.3)
-
-    print("更新完成。")
-
-if __name__ == "__main__":
-    main()
-
-
-SNAPSHOT_DATABASE_ID = os.environ["SNAPSHOT_DATABASE_ID"].strip('"“”‘’ ')
-
-def get_all_holdings_full() -> list[dict]:
-    """查询持有总览中的全部资产页面（含已清仓），用于汇总总市值/总投入。"""
-    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
-    resp = requests.post(url, headers=HEADERS, json={}, timeout=15)
-    resp.raise_for_status()
-    return resp.json().get("results", [])
 
 
 def get_realized_profit_sum(sell_database_id: str) -> float:
@@ -176,5 +144,35 @@ def create_daily_snapshot(sell_database_id: str) -> None:
     print(f"[OK]   每日快照已写入 → 总市值{total_value:.2f} 总投入{total_invested:.2f} 总利润{total_profit:.2f}")
 
 
-# 在 main() 末尾调用：
-# create_daily_snapshot(sell_database_id=os.environ["SELL_DATABASE_ID"])
+def main():
+    print(f"[{date.today()}] 开始更新股价...")
+    pages = get_all_holdings()
+
+    # 只处理在 ASSET_MAP 中的资产
+    targets = {}
+    page_map = {}
+    for page in pages:
+        asset_name = page["properties"]["资产"]["title"][0]["plain_text"]
+        if asset_name not in ASSET_MAP:
+            print(f"[SKIP] {asset_name}")
+            continue
+        targets[asset_name] = ASSET_MAP[asset_name]
+        page_map[asset_name] = page["id"]
+
+    if targets:
+        prices = get_prices_sina(targets)  # 一次请求拿所有价格
+        for name, price in prices.items():
+            update_price(page_map[name], price)
+            print(f"[OK]   {name} → {price}")
+            time.sleep(0.3)
+    else:
+        print("无需更新价格。")
+
+    print("价格更新完成。")
+
+    # 写入每日快照（用于利润趋势图）
+    create_daily_snapshot(sell_database_id=SELL_DATABASE_ID)
+
+
+if __name__ == "__main__":
+    main()
