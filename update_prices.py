@@ -107,3 +107,73 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+SNAPSHOT_DATABASE_ID = os.environ["SNAPSHOT_DATABASE_ID"].strip('"“”‘’ ')
+
+def get_all_holdings_full() -> list[dict]:
+    """查询持有总览中的全部资产页面（含已清仓），用于汇总总市值/总投入。"""
+    url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
+    resp = requests.post(url, headers=HEADERS, json={}, timeout=15)
+    resp.raise_for_status()
+    return resp.json().get("results", [])
+
+
+def get_realized_profit_sum(sell_database_id: str) -> float:
+    """汇总卖出记录数据库中「单笔利润（自动）」公式列的总和。"""
+    url = f"https://api.notion.com/v1/databases/{sell_database_id}/query"
+    total = 0.0
+    payload = {}
+    while True:
+        resp = requests.post(url, headers=HEADERS, json=payload, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        for page in data.get("results", []):
+            formula = page["properties"]["单笔利润（自动）"]["formula"]
+            total += formula.get("number") or 0
+        if not data.get("has_more"):
+            break
+        payload = {"start_cursor": data["next_cursor"]}
+    return round(total, 2)
+
+
+def create_daily_snapshot(sell_database_id: str) -> None:
+    """汇总持有总览的市值/投入 + 卖出记录的已实现利润，写入每日快照数据库。"""
+    pages = get_all_holdings_full()
+    total_value = 0.0
+    total_invested = 0.0
+    for page in pages:
+        props = page["properties"]
+        market_value = props["当前市值（自动）"]["formula"].get("number")
+        invested = props["总投入（自动）"]["formula"].get("number") or 0
+        # 已清仓资产当前市值为空，不计入市值，也不计入投入（成本已通过卖出记录结算）
+        status = props["当前状态"]["status"]["name"]
+        if status == "已清仓":
+            continue
+        total_value += market_value or 0
+        total_invested += invested
+
+    realized_profit = get_realized_profit_sum(sell_database_id)
+    total_profit = round((total_value - total_invested) + realized_profit, 2)
+    return_rate = round(total_profit / total_invested * 100, 2) if total_invested else 0
+
+    today_str = str(date.today())
+    url = "https://api.notion.com/v1/pages"
+    payload = {
+        "parent": {"database_id": SNAPSHOT_DATABASE_ID},
+        "properties": {
+            "快照日期": {"title": [{"text": {"content": today_str}}]},
+            "日期": {"date": {"start": today_str}},
+            "总市值": {"number": round(total_value, 2)},
+            "总投入": {"number": round(total_invested, 2)},
+            "已实现利润": {"number": realized_profit},
+            "总利润": {"number": total_profit},
+            "总收益率": {"number": return_rate},
+        },
+    }
+    resp = requests.post(url, headers=HEADERS, json=payload, timeout=15)
+    resp.raise_for_status()
+    print(f"[OK]   每日快照已写入 → 总市值{total_value:.2f} 总投入{total_invested:.2f} 总利润{total_profit:.2f}")
+
+
+# 在 main() 末尾调用：
+# create_daily_snapshot(sell_database_id=os.environ["SELL_DATABASE_ID"])
