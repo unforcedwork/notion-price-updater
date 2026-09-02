@@ -1,23 +1,31 @@
-# .github/workflows/update_prices.yml
-name: Update Stock Prices
+name: Update Notion asset prices
 
 on:
   schedule:
-    - cron: '30 7 * * 1-5'   # UTC 07:30 = 北京时间 15:30，仅工作日
-  workflow_dispatch:           # 允许手动触发
+    - cron: "40 7 * * 1-5" # 北京时间 15:40，周一至周五
+  workflow_dispatch:
+
+concurrency:
+  group: notion-price-updater
+  cancel-in-progress: false
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - run: pip install requests akshare
-      - run: python update_prices.py
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run tests
+        run: python -m unittest -v
+      - name: Update prices and snapshot
+        run: python update_prices.py
         env:
-          NOTION_TOKEN: $ secrets.NOTION_TOKEN 
-          databaseID: $ secrets.databaseID 
-          SNAPSHOT_DATABASE_ID: $ secrets.SNAPSHOT_DATABASE_ID 
-          SELL_DATABASE_ID: $ secrets.SELL_DATABASE_ID 
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          HOLDINGS_DATABASE_ID: ${{ secrets.HOLDINGS_DATABASE_ID }}
+          SNAPSHOT_DATABASE_ID: ${{ secrets.SNAPSHOT_DATABASE_ID }}
+          SELL_DATABASE_ID: ${{ secrets.SELL_DATABASE_ID }}
