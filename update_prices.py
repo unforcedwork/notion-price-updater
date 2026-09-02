@@ -92,6 +92,24 @@ def build_session(settings: Settings) -> requests.Session:
     return session
 
 
+def _annotated_http_error(exc: requests.HTTPError, response: requests.Response) -> requests.HTTPError:
+    """把 Notion 错误正文和排查提示附到异常信息，从 Actions 日志可直接定位。"""
+    try:
+        body = response.json()
+        detail = body.get("message", "") if isinstance(body, dict) else ""
+    except Exception:
+        detail = (response.text or "")[:200]
+    hints = {
+        401: "Token 无效或已吊销：检查 Secret NOTION_TOKEN 是否为新建的 Integration Token",
+        403: "没有权限：检查 Integration 是否已连接该数据库",
+        404: "资源不存在：检查数据库 ID 是否正确（32 位十六进制）、Integration 是否已连接该数据库",
+        429: "请求被限流：稍后手动重跑即可",
+    }
+    hint = hints.get(response.status_code, "")
+    message = f"{exc}；Notion 返回：{detail}" + (f"。排查提示：{hint}" if hint else "")
+    return requests.HTTPError(message, response=response)
+
+
 def request_json(
     session: requests.Session,
     method: str,
@@ -102,7 +120,10 @@ def request_json(
     timeout: int = 20,
 ) -> dict[str, Any]:
     response = session.request(method, url, json=payload, headers=headers, timeout=timeout)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise _annotated_http_error(exc, response) from exc
     if not response.content:
         return {}
     return response.json()
@@ -184,8 +205,9 @@ def fetch_sina_quotes(
         fields = match.group(1).split(",") if match else []
         try:
             price = float(fields[3])
-            day = fields[30]
-            if price <= 0 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            # 日期字段位置可能漂移，按格式扫描定位。
+            day = next((f for f in fields if re.fullmatch(r"\d{4}-\d{2}-\d{2}", f)), None)
+            if price <= 0 or day is None:
                 raise ValueError
             quotes[name] = Quote(price=price, day=day)
         except (IndexError, TypeError, ValueError):
@@ -218,10 +240,13 @@ def fetch_tencent_quotes(
         fields = match.group(1).split("~") if match else []
         try:
             price = float(fields[3])
-            ts = fields[30]
-            if price <= 0 or not re.fullmatch(r"\d{14}", ts):
+            # 不同标的的买卖盘字段数不同，时间戳位置不固定，按格式扫描定位。
+            ts = next((f for f in fields if re.fullmatch(r"\d{14}", f)), None)
+            if price <= 0 or ts is None:
                 raise ValueError
-            quotes[name] = Quote(price=price, day=f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}")
+            day = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
+            datetime.strptime(day, "%Y-%m-%d")  # 非法日期抛 ValueError
+            quotes[name] = Quote(price=price, day=day)
         except (IndexError, TypeError, ValueError):
             errors.append(name)
     if errors:

@@ -287,5 +287,46 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result["总市值"], 7000.0)
 
 
+# 2026-09-02 从 qt.gtimg.cn 抓取的真实报文（三只当前持仓）
+REAL_TENCENT_PAYLOAD = (
+    'v_sz000858="51~五 粮 液~000858~70.83~71.83~71.61~257811~76794~180996~70.82~4~0.00~138~0.00~0~0.00~0~0.00~0~70.82~4~0.00~0~0.00~0~0.00~0~0.00~0~~20260902145700~-1.00~-1.39~71.76~70.81~70.83/257811/1833340752~257811~183334~0.66~21.01~~71.76~70.81~1.32~2749.28~2749.34~2.32~79.01~64.65~1.00~138~71.11~15.71~30.70~~~0.26~183334.0752~0.0000~0~ A~GP-A~-31.47~-1.49~7.28~11.04~7.26~126.34~67.94~-1.47~-6.19~-7.45~3881513391~3881608005~94.52~-35.49~3881513391~~~-42.60~-0.04~~CNY~0~~70.88~-70~";\n'
+    'v_sz000400="51~许继电气~000400~21.06~21.49~21.40~93822~36498~57288~0.00~0~0.00~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~0.00~0~~20260902145700~-0.43~-2.00~21.45~21.04~21.06/93822/198177816~93822~19818~0.92~22.60~~21.45~21.04~1.91~213.77~214.52~1.74~23.64~19.34~0.88~0~21.12~25.79~18.38~~~1.12~19817.7816~0.0000~0~ A~GP-A~-17.38~-6.19~2.18~7.68~4.09~34.43~19.37~-5.69~-10.31~-4.83~1015065609~1018622249~~-17.76~1015065609~~~-5.31~0.00~~CNY~0~~21.15~-107~";\n'
+    'v_sh513500="1~标普500ETF博时~513500~2.644~2.716~2.679~2227767~850519~1376234~2.643~8904~2.642~5277~2.641~5102~2.640~9076~2.639~1209~2.644~6027~2.645~3829~2.646~2976~2.647~5737~2.648~3192~~20260902145656~-0.072~-2.65~2.681~2.642~2.644/2227767/591906236~2227767~59191~2.18~~~2.681~2.642~1.44~270.08~270.08~0.00~2.988~2.444~2.27~7807~2.657~~~~~~59190.6236~0.0000~0~ A~ETF~8.72~-2.36~~~~2.778~2.130~0.08~-0.94~3.61~10214638600~10214638600~15.21~7.87~10214638600~8.04~2.4472~20.90~0.00~2.4652~CNY~0~___D__F__Y~2.650~-8334~";'
+)
+
+
+class RealDataTests(unittest.TestCase):
+    def test_tencent_parser_handles_real_payload(self):
+        """用生产环境真实报文验证腾讯解析。"""
+        session = QueueSession([FakeResponse(text=REAL_TENCENT_PAYLOAD)])
+        quotes = app.fetch_tencent_quotes(
+            {"五粮液": "sz000858", "许继电气": "sz000400", "标普500": "sh513500"},
+            session,
+        )
+        self.assertEqual(quotes["五粮液"], app.Quote(70.83, "2026-09-02"))
+        self.assertEqual(quotes["许继电气"], app.Quote(21.06, "2026-09-02"))
+        self.assertEqual(quotes["标普500"], app.Quote(2.644, "2026-09-02"))
+
+
+class ErrorHintTests(unittest.TestCase):
+    def test_404_includes_connection_hint(self):
+        session = QueueSession(
+            [FakeResponse(data={"message": "Could not find database"}, status_code=404)]
+        )
+        with self.assertRaisesRegex(app.requests.HTTPError, "Integration 是否已连接该数据库"):
+            app.request_json(
+                session, "POST", "https://api.notion.com/v1/databases/x/query", payload={}
+            )
+
+    def test_401_includes_token_hint(self):
+        session = QueueSession(
+            [FakeResponse(data={"message": "Unauthorized"}, status_code=401)]
+        )
+        with self.assertRaisesRegex(app.requests.HTTPError, "NOTION_TOKEN"):
+            app.request_json(
+                session, "POST", "https://api.notion.com/v1/databases/x/query", payload={}
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

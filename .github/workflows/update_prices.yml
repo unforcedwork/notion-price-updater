@@ -14,8 +14,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - name: 检查 Secrets 配置
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          HOLDINGS_DATABASE_ID: ${{ secrets.HOLDINGS_DATABASE_ID }}
+          SNAPSHOT_DATABASE_ID: ${{ secrets.SNAPSHOT_DATABASE_ID }}
+          SELL_DATABASE_ID: ${{ secrets.SELL_DATABASE_ID }}
+        run: |
+          fail=0
+          for name in NOTION_TOKEN HOLDINGS_DATABASE_ID SNAPSHOT_DATABASE_ID SELL_DATABASE_ID; do
+            value=$(printenv "$name" || true)
+            if [ -z "$value" ]; then
+              echo "::error::缺少 Secret：$name（仓库 Settings → Secrets and variables → Actions 添加）"
+              fail=1
+            fi
+          done
+          for name in HOLDINGS_DATABASE_ID SNAPSHOT_DATABASE_ID SELL_DATABASE_ID; do
+            value=$(printenv "$name" || true)
+            if [ -n "$value" ] && ! printf '%s' "$value" | grep -Eq '^[0-9a-fA-F-]{32,36}$'; then
+              echo "::error::Secret $name 格式异常：数据库 ID 应为 32 位十六进制（打开数据库 → 复制链接获取）"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "4 个 Secrets 均已配置且格式正常"
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
